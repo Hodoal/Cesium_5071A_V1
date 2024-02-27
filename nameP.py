@@ -1,0 +1,32 @@
+
+
+class Name_parameter():
+    database_params = {
+        "Dato 1": "D01",
+        "Dato 2": "D02",
+        "Dato 3": "D03",
+        "Dato 4": "D04",
+        "Dato 5": "D05",
+        "Dato 6a": "D06a",
+        "Dato 6b": "D06b",
+        "Dato 7": "D07",
+        "Dato 8": "D08",
+        "Dato 9": "D09",
+        "Dato 10": "D10",
+        "Dato 11": "D11",
+        "Dato 12": "D12",
+        "Dato 13a": "D13a",
+        "Dato 13b": "D13b",
+        "Dato 13c": "D13c",
+        "Dato 13d": "D13d",
+        "Dato 14": "D14",
+        "Dato 15a": "D15a",
+        "Dato 15b": "D15b",
+        "Dato 15c": "D15c",
+        "Dato 16": "D16",
+        "Dato 17": "D17",
+        "Dato 18": "D18",
+        "Dato 19": "D19",
+        "Dato 20": "D20",
+        "Dato 21": "D21",
+    }

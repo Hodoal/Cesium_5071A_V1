@@ -1,0 +1,11 @@
+<RCC>
+  <qresource prefix="fisica">
+    <file>Fisica.png</file>
+  </qresource>
+  <qresource prefix="inm">
+    <file>INM.png</file>
+  </qresource>
+  <qresource prefix="UA">
+    <file>UA.png</file>
+  </qresource>
+</RCC>
