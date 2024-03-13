@@ -23,14 +23,14 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from datetime import datetime, timedelta
+from frequencyShift import Shift
 
-UPDATE_INTERVAL = 5000  # Actualizar cada 5 segundos
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.ui = Ui_Cesium_5071A()
         self.ui.setupUi(self)
-        self.ui.star.clicked.connect(self.start_flask)
+        self.ui.start.clicked.connect(self.start_flask)
         #self.ui.stop.clicked.connect(self.stop_flask)
         self.populate_combobox()
         self.ui.export_2.clicked.connect(self.export_data)
@@ -89,8 +89,6 @@ class MainApp(QMainWindow):
         self.ax.set_xlabel("Date")
         self.ax.set_ylabel(param_name.replace('_', ' '))
         self.ax.grid(True, linestyle='--', color='gray', linewidth=0.5)
-
-
         # Actualizar el lienzo del gráfico
         self.canvas.draw()
 
@@ -107,25 +105,25 @@ class MainApp(QMainWindow):
         try:
             with app.app_context():  # Establecer el contexto de la aplicación
                 inspector = inspect(db.engine)
-                table_columns = inspector.get_columns('instrumentsdb')  # Reemplaza 'nombre_de_tu_tabla' con el nombre real de tu tabla
+                table_columns = inspector.get_columns('instrumentsdb')  # Reemplaza 'instrumentsdb' con el nombre real de tu tabla
         except Exception as e:
             print("Error al obtener las columnas de la tabla:", e)
-            return
+            
 
         # Obtener los nombres de las columnas que no son de tipo str, ni son id, ni son data_cread, ni son MJD
         param_names = [column['name'] for column in table_columns if not isinstance(column['type'], String) and column['name'] not in ["id", "date_created", "MJD"]]
         # Agregar las claves al QComboBox
         param_names = [param.replace('_', ' ') for param in param_names]
         self.ui.parameter.addItems(param_names)
-
-
+    
 
     def start_flask(self):
         flask_thread = threading.Thread(target=flask_runner)
         flask_thread.start()
 
         # Deshabilitar el botón para evitar múltiples clics
-        self.ui.star.setEnabled(False)
+        self.ui.start.setEnabled(False)
+
         # Mostrar un mensaje de confirmación
         QMessageBox.information(self, "Server Started", "Flask server started successfully!")
         self.populate_combobox()
@@ -170,10 +168,14 @@ def flask_runner():
     # Crear todas las tablas de la base de datos dentro del contexto de la aplicación Flask
     with app.app_context():
         db.create_all()
+        #calculate_and_update_shift()
 
     app.run(debug=True, use_reloader=False)
 
 
+
+
+   
 def send_dataintrument():
     try:
         with app.app_context():
@@ -192,7 +194,7 @@ def send_dataintrument():
             # Agregar la instancia a la base de datos
             db.session.add(instrumentdb)
             db.session.commit()
-            
+
             # Cerrar la conexión con el instrumento
             Instru.close()
             RM.close()
@@ -235,6 +237,19 @@ class Instrumentsdb(db.Model):
     Oscillator_oven_voltage = db.Column(db.Float)
     Zeeman_Freq = db.Column(db.Float)
     CBT_Oven_Err = db.Column(db.Float)
+
+class Shift(db.Model):
+    __tablename__ = 'shift'
+    id = db.Column(db.Integer, primary_key=True)
+    date_created = db.Column(db.Integer, db.ForeignKey('instrumentsdb.id'))
+    DV_Zeeman = db.Column(db.Float)
+    DV_Zeman_AC = db.Column(db.Float)
+    DV_Stark = db.Column(db.Float)
+    DV_Gavitational_effects = db.Column(db.Float)
+    DV_BBR = db.Column(db.Float)
+    # Relación con la tabla de datos existente
+    data = db.relationship("Instrumentsdb")
+
 @app.route("/api/savedbintruments")
 def send_dataintrument():
     try:
