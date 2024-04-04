@@ -23,7 +23,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from datetime import datetime, timedelta
-from frequencyShift import Shift
+from frequencyShift import Shift_F
 
 class MainApp(QMainWindow):
     def __init__(self):
@@ -32,7 +32,7 @@ class MainApp(QMainWindow):
         self.ui.setupUi(self)
         self.ui.start.clicked.connect(self.start_flask)
         #self.ui.stop.clicked.connect(self.stop_flask)
-        self.populate_combobox()
+        #self.populate_combobox()
         self.ui.export_2.clicked.connect(self.export_data)
         # Configurar el temporizador para actualizar el gráfico periódicamente
         self.timer = QTimer(self)
@@ -67,6 +67,10 @@ class MainApp(QMainWindow):
         with app.app_context():
             data = self.get_last_100_data(param_name)
 
+        if data is None:
+            print("No hay datos disponibles para graficar.")
+            return
+
         # Extraer los valores de los datos
         date_values = [item.date_created for item in data]
         values = [getattr(item, param_name) for item in data]
@@ -93,9 +97,15 @@ class MainApp(QMainWindow):
         self.canvas.draw()
 
     def get_last_100_data(self, param_name):
-        # Obtener los últimos 100 datos del parámetro seleccionado de la base de datos
-        data = Instrumentsdb.query.with_entities(Instrumentsdb.date_created, getattr(Instrumentsdb, param_name)).order_by(Instrumentsdb.date_created.desc()).limit(100).all()
-        return data
+        try:
+            # Obtener los últimos 100 datos del parámetro seleccionado de la base de datos
+            data = Instrumentsdb.query.with_entities(Instrumentsdb.date_created, getattr(Instrumentsdb, param_name)).order_by(Instrumentsdb.date_created.desc()).limit(1000).all()
+            return data
+        except AttributeError as e:
+            # Manejar la excepción cuando no hay datos en la tabla
+            print("No hay datos disponibles en la tabla:", e)
+            return None
+
 
     def populate_combobox(self):
         # Limpiar el contenido actual del QComboBox
@@ -126,7 +136,11 @@ class MainApp(QMainWindow):
 
         # Mostrar un mensaje de confirmación
         QMessageBox.information(self, "Server Started", "Flask server started successfully!")
-        self.populate_combobox()
+        try:
+            self.populate_combobox()
+        except Exception as e:
+        # Manejar la excepción aquí
+            print("Error:", e)
 
     def export_data(self):
         try:
@@ -250,6 +264,53 @@ class Shift(db.Model):
     # Relación con la tabla de datos existente
     data = db.relationship("Instrumentsdb")
 
+def check_data_dbmodeltable(model):
+    try:
+        with app.app_context():
+
+            num_records = model.query.count()
+
+            if num_records > 0:
+                return True
+            else:
+                return False
+    except Exception as e:
+        print("Error:", e)
+
+def dicts_to_modelos(lista_datos,model):
+    try:
+        with app.app_context():
+            for datos in lista_datos:
+                # Crear una instancia del modelo con los datos del diccionario
+                instrumentdb = model(**datos)
+
+                # Agregar la instancia a la sesión de la base de datos
+                db.session.add(instrumentdb)
+
+            # Realizar la confirmación para guardar todos los cambios
+            db.session.commit()
+
+    except Exception as e:
+        print("Error:", e)
+
+
+@app.route('/api/send_datainstrument', methods=['POST'])
+def send_data():
+    data = request.json  # Espera que los datos se envíen como JSON en el cuerpo de la solicitud
+    try:
+        # Crear una instancia de Instrumentsdb con los datos recibidos
+        instrument = Instrumentsdb(**data)
+        
+        # Agregar la instancia a la base de datos
+        db.session.add(instrument)
+        db.session.commit()
+        
+        return jsonify({'message': 'Datos guardados correctamente'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    
+
 @app.route("/api/savedbintruments")
 def send_dataintrument():
     try:
@@ -262,6 +323,7 @@ def send_dataintrument():
 
             # Leer datos del instrumento pasando la conexión como argumento
             datos = instrumento.read_data(Instru)
+            
 
             # Crear una instancia del modelo con los datos del instrumento
             instrumentdb = Instrumentsdb(**datos)
@@ -276,6 +338,8 @@ def send_dataintrument():
 
     except Exception as e:
         print("Error:", e)
+
+
 
 def query_to_dict(rset):
     result = defaultdict(list)

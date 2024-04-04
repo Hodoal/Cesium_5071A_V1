@@ -1,7 +1,7 @@
 
 import numpy as np
 
-class Shift(): 
+class Shift_F(): 
     @staticmethod
     def D_BBR(data): #bien 
         data=data+273.15
@@ -23,11 +23,27 @@ class Shift():
         return dv
     
     @staticmethod
-    def Zeeman(data): 
+
+    def Zeeman(data):
         Bc = 6e-6
-        I = np.mean(data/10000)
-        B=(Bc/I)*data
-        dv = ((427.45*10**(8)*(B**2+np.std(B)**2))/9192631770)
-        return dv
-    
+        dv_list = []
+        
+        # Iterar sobre el rango de tamaño de muestra
+        for i in range(1, len(data) + 1):
+            # Calcular la media y la desviación estándar de la ventana actual
+            window_mean = data.iloc[max(0, i - 50):i].mean()
+            window_std = data.iloc[max(0, i - 50):i].std()
+            
+            # Calcular el campo magnético y la diferencia de frecuencia
+            B = (Bc / window_mean) * data.iloc[i - 1]
+            dv = ((427.45 * 10 ** (8) * (B ** 2 + window_std ** 2)) / 9192631770)
+            
+            # Agregar la diferencia de frecuencia a la lista
+            dv_list.append(dv)
+        
+        return dv_list
+    @staticmethod
+    def gravitation():
+        V_g = -(9.80665/(299792458)**2)*2553
+        return V_g
     
