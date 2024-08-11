@@ -177,99 +177,31 @@ class CesiumInstrument():
         data = {
             'MJD': MJD,
             'D01': D01,
-            'D02': D02,
-            'D03': D03,
-            'D04': D04,
-            'D05': D05,
-            'D06a': D06a,
-            'D06b': D06b,
-            'D07': D07,
-            'D08': D08,
-            'D09': D09,
-            'D10': D10,
-            'D11': D11,
-            'D12': D12,
-            'D13a': D13a,
-            'D13b': D13b,
-            'D13c': D13c,
-            'D13d': D13d,
-            'D14': D14,
-            'D15a': D15a,
-            'D15b': D15b,
-            'D15c': D15c,
-            'D16': D16,
-            'D17': D17,
-            'D18': D18,
-            'D19': D19,
-            'D20': D20,
-            'D21': D21,
+            'Beam_current_setpoint': D02,
+            'Cfield_current_setpoint': D03,
+            'Ion_pump_current': D04,
+            'Signal_gain': D05,
+            'RF_Attenuator_setpoints_1': D06a,
+            'RF_Attenuator_setpoints_2': D06b,
+            'Power_supply_status': D07,
+            'Temperature': D08,
+            'Cesium_oven_heater': D09,
+            'ECesium_oven_heater_voltage': D10,
+            'Hot_wire_ionizer_voltage': D11,
+            'Mass_spectrometer_voltage': D12,
+            'PLLoop_1': D13a,
+            'PLLoop_2': D13b,
+            'PLLoop_3': D13c,
+            'PLLoop_4': D13d,
+            'ROSCillator': D14,
+            'Power_supplie_1': D15a,
+            'Power_supplie_2': D15b,
+            'Power_supplie_3': D15c,
+            'Reference_oscillator_frequency': D16,
+            'Fractional_frequency_offset': D17,
+            'Programmed_frequency_at_specified': D18,
+            'Oscillator_oven_voltage': D19,
+            'Zeeman_Freq': D20,
+            'CBT_Oven_Err': D21,
         }
         return data
-    
-    def create_table(conn):
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS prueba (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                UTC_menos_5 DATETIME,
-                MJD VARCHAR(255),
-                D01 VARCHAR(255),
-                D02 VARCHAR(255),
-                D03 VARCHAR(255),
-                D04 VARCHAR(255),
-                D05 VARCHAR(255),
-                D06a VARCHAR(255),
-                D06b VARCHAR(255),
-                D07 VARCHAR(255),
-                D08 VARCHAR(255),
-                D09 VARCHAR(255),
-                D10 VARCHAR(255),
-                D11 VARCHAR(255),
-                D12 VARCHAR(255),
-                D13a VARCHAR(255),
-                D13b VARCHAR(255),
-                D13c VARCHAR(255),
-                D13d VARCHAR(255),
-                D14 VARCHAR(255),
-                D15a VARCHAR(255),
-                D15b VARCHAR(255),
-                D15c VARCHAR(255),
-                D16 VARCHAR(255),
-                D17 VARCHAR(255),
-                D18 VARCHAR(255),
-                D19 VARCHAR(255),
-                D20 VARCHAR(255),
-                D21 VARCHAR(255)
-            )
-        ''')
-        conn.commit()
-        cursor.close()
-
-    # Función para insertar datos en la base de datos
-    def insertar_datos(conexion, datos):
-        cursor = conexion.cursor()
-
-        # Consulta SQL para insertar datos
-        consulta = '''
-            INSERT INTO prueba (
-                UTC_menos_5, MJD, D01, D02, D03, D04, D05, D06a, D06b, D07, D08, D09, D10, D11, D12,
-                D13a, D13b, D13c, D13d, D14, D15a, D15b, D15c, D16, D17, D18, D19, D20, D21
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        '''
-
-        # Formatear los datos
-        datos_formateados = (
-            datos['UTC_menos_5'], datos['MJD'], datos['D01'], datos['D02'], datos['D03'],
-            datos['D04'], datos['D05'], datos['D06a'], datos['D06b'], datos['D07'], datos['D08'],
-            datos['D09'], datos['D10'], datos['D11'], datos['D12'], datos['D13a'], datos['D13b'],
-            datos['D13c'], datos['D13d'], datos['D14'], datos['D15a'], datos['D15b'], datos['D15c'],
-            datos['D16'], datos['D17'], datos['D18'], datos['D19'], datos['D20'], datos['D21']
-        )
-        # Ejecutar la consulta
-        cursor.execute(consulta, datos_formateados)
-        # Confirmar los cambios
-        conexion.commit()
-        # Cerrar el cursor
-        cursor.close()  
-    

@@ -1,33 +1,103 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog, QVBoxLayout
-from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog, QVBoxLayout, QSplashScreen
+from PyQt6.QtGui import QPainter, QPixmap, QColor, QIcon, QFont
+from PyQt6.QtCore import QTimer, Qt, QPointF
+from PyQt6 import QtWidgets
 from Interface import Ui_Cesium_5071A
 import requests
-from flask import Flask, jsonify, make_response, request
-from flask_sqlalchemy import SQLAlchemy
-from classCesium import CesiumInstrument
-import pandas as pd
-from collections import defaultdict
-from sqlalchemy import inspect
 from io import StringIO
-from apscheduler.schedulers.background import BackgroundScheduler
-import pyvisa
+import pandas as pd
+from datetime import datetime
+from sqlalchemy import inspect
+from API import flask_runner
 import threading
-from config import Config
 from sqlalchemy.types import String
-import matplotlib 
+import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 matplotlib.use('QtAgg')
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 from datetime import datetime, timedelta
 from frequencyShift import Shift_F
+from model import app, db, Instrumentsdb, Shift
+from sqlalchemy.exc import ProgrammingError
+import math
+
+
+class SplashScreen(QSplashScreen):
+    def __init__(self):
+        # Carga la imagen de fondo
+        pixmap = QPixmap("img/fondo.png")
+        
+        # Ajusta el tamaño del pixmap al tamaño del splash screen
+        self.pixmap = pixmap.scaled(800, 800, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        
+        # Inicializa el splash screen con la imagen ajustada
+        super().__init__(self.pixmap)
+        
+        # Configura las propiedades de la ventana
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.setGeometry(500, 300, 800, 630)  # Ajusta el tamaño y la posición según tus necesidades
+
+        # Inicializa el valor de progreso
+        self.progress_value = 0
+        self.dot_count = 8  # Número de puntos en el círculo de carga
+        
+        # Configura el temporizador
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.advance_loading)
+        self.timer.start(100)  # Actualiza cada 100 ms
+
+        # Establece la máscara para la imagen
+        self.setMask(self.pixmap.mask())
+
+    def advance_loading(self):
+        self.progress_value += 1
+        self.update()  # Redibuja el círculo de carga
+        if self.progress_value >= 100:
+            self.timer.stop()
+            self.close()
+
+    def draw_loading_circle(self, painter, center_x, center_y, radius):
+        for i in range(self.dot_count):
+            angle = (360 / self.dot_count) * i + self.progress_value * 10
+            radian = math.radians(angle)
+            dot_radius = 8  # Tamaño de los puntos
+            dot_x = center_x + math.cos(radian) * radius
+            dot_y = center_y + math.sin(radian) * radius
+            color = QColor(129, 145, 166, int(255 * (i + 1) / self.dot_count))  # Gradiente de transparencia
+            painter.setBrush(color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(dot_x, dot_y), dot_radius, dot_radius)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        
+        painter = QPainter(self)
+        # Ajusta la posición del círculo aquí
+        center_x = self.rect().center().x() - 220
+        center_y = self.rect().center().y() + 20  # Desplaza el círculo según sea necesario
+        radius = 30  # Radio del círculo de carga
+        
+        # Dibuja el círculo de carga
+        self.draw_loading_circle(painter, center_x, center_y, radius)
+
+        text = "Loading..."
+        font = QFont("DejaVu Sans Condensed", 10)
+        painter.setFont(font)
+        text_width = painter.fontMetrics().boundingRect(text).width()
+        text_x = center_x - text_width // 2
+        text_y = center_y + radius + 20  # Ajusta la posición vertical del texto
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(text_x, text_y, text)
+    def mousePressEvent(self, event):
+        pass
+
 
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowIcon(QIcon('img/favicon.ico'))
         self.ui = Ui_Cesium_5071A()
         self.ui.setupUi(self)
         self.ui.start.clicked.connect(self.start_flask)
@@ -38,7 +108,9 @@ class MainApp(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(1000)  # Intervalo de tiempo en milisegundos
-
+        self.warning_shown = {}
+        self.last_warning_time = {}
+        self.warning_interval = timedelta(minutes=10)  #
         # Crear un lienzo para el gráfico y agregarlo al frame Graph
         self.graph_layout = QVBoxLayout()
         self.ui.Graph.setLayout(self.graph_layout)  # Establecer el layout en el QFrame Graph
@@ -51,38 +123,26 @@ class MainApp(QMainWindow):
         self.graph_layout.addWidget(self.canvas)
         self.last_clear_time = None
         self.legend = None
+        self.ui.Graph.installEventFilter(self)
 
     def update_plot(self):
         param_name = self.ui.parameter.currentText().replace(' ', '_')
         if param_name == "Select_a_parameter...":
             return
-
+        self.process_new_data()
         current_time = datetime.now()
-
         if self.last_clear_time is None or current_time - self.last_clear_time >= timedelta(days=1):
             self.ax.clear()
             self.last_clear_time = current_time
-
-        # Obtener los últimos 100 datos del parámetro seleccionado de la base de datos
         with app.app_context():
             data = self.get_last_100_data(param_name)
-
         if data is None:
-            print("No hay datos disponibles para graficar.")
             return
-
-        # Extraer los valores de los datos
         date_values = [item.date_created for item in data]
         values = [getattr(item, param_name) for item in data]
-
-        # Remover las líneas anteriores del gráfico
         for line in self.ax.lines:
             line.remove()
-
-        # Graficar los datos
         self.ax.plot(date_values, values, label=param_name.replace('_', ' '), marker='o', linestyle='-')
-
-        # Configurar leyendas y etiquetas
         if self.legend:
             self.legend.remove()
         self.legend = self.ax.legend()
@@ -93,19 +153,136 @@ class MainApp(QMainWindow):
         self.ax.set_xlabel("Date")
         self.ax.set_ylabel(param_name.replace('_', ' '))
         self.ax.grid(True, linestyle='--', color='gray', linewidth=0.5)
-        # Actualizar el lienzo del gráfico
+
+        if param_name == "ECesium_oven_heater_voltage":
+            self.ax.axhline(y=1000, color='red', linestyle='--', label='1000V threshold')
+            self.ax.axhline(y=2553, color='red', linestyle='--', label='2553V threshold')
+            if values[-1] < 1000 or values[-1] > 2553:
+                self.check_and_show_warning(param_name, "Warning: Possible saturation in the electron multiplier", values[-1], 1000, 2553)
+        elif param_name == "Cfield_current_setpoint":
+            self.ax.axhline(y=0.0100, color='blue', linestyle='--', label='10.0 mA threshold')
+            self.ax.axhline(y=0.01405, color='blue', linestyle='--', label='14.05 mA threshold')
+            if values[-1] < 0.0100 or values[-1] > 0.01405:
+                self.check_and_show_warning(param_name, "Warning: Cfield current setpoint is out of acceptable range", values[-1], 0.0100, 0.01405)
+        elif param_name == "Signal_gain":
+            self.ax.axhline(y=0.144, color='green', linestyle='--', label='14.4% threshold')
+            self.ax.axhline(y=0.580, color='green', linestyle='--', label='58% threshold')
+            if values[-1] < 0.144 or values[-1] > 0.580:
+                self.check_and_show_warning(param_name, "Warning: Signal gain is out of acceptable range", values[-1], 0.144, 0.580)
+        elif param_name == "Reference_oscillator_frequency":
+            self.ax.axhline(y=-0.950, color='purple', linestyle='--', label='-95% threshold')
+            self.ax.axhline(y=0.950, color='purple', linestyle='--', label='95% threshold')
+            if values[-1] < -0.950 or values[-1] > 0.950:
+                self.check_and_show_warning(param_name, "Warning: Reference oscillator frequency is out of acceptable range", values[-1], -0.950, 0.950)
+        elif param_name == "Ion_pump_current":
+            self.ax.axhline(y=0.0, color='orange', linestyle='--', label='0 µA threshold')
+            self.ax.axhline(y=0.0000004, color='orange', linestyle='--', label='40 µA threshold')
+            if values[-1] < 0.0 or values[-1] > 0.0000004:
+                self.check_and_show_warning(param_name, "Warning: Ion pump current is out of acceptable range", values[-1], 0.0, 0.0000004)
+        
+        self.fig.tight_layout()
         self.canvas.draw()
+
+    def check_and_show_warning(self, param_name, message, value, lower_bound, upper_bound):
+        if param_name not in self.warning_shown or not self.warning_shown[param_name]:
+            if value < lower_bound or value > upper_bound:
+                # Mostrar el mensaje de advertencia si no se ha mostrado una advertencia recientemente
+                last_warning = self.last_warning_time.get(param_name, datetime.min)
+                if datetime.now() - last_warning > self.warning_interval:
+                    self.show_warning(message)
+                    self.last_warning_time[param_name] = datetime.now()
+                    self.warning_shown[param_name] = True
+        else:
+            # Permitir mostrar advertencia nuevamente si el último valor está dentro del rango
+            if value >= lower_bound and value <= upper_bound:
+                self.warning_shown[param_name] = False
+
+    def show_warning(self, message):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setText(message)
+        msg.setWindowTitle("Warning")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
 
     def get_last_100_data(self, param_name):
         try:
-            # Obtener los últimos 100 datos del parámetro seleccionado de la base de datos
             data = Instrumentsdb.query.with_entities(Instrumentsdb.date_created, getattr(Instrumentsdb, param_name)).order_by(Instrumentsdb.date_created.desc()).limit(1000).all()
             return data
         except AttributeError as e:
-            # Manejar la excepción cuando no hay datos en la tabla
-            print("No hay datos disponibles en la tabla:", e)
             return None
+    
+    def process_new_data(self, param_name1='Temperature', param_name2='Cfield_current_setpoint'):
+        if not param_name1 and not param_name2:
+            return
 
+        with app.app_context():
+            try:
+                last_shift_entry = Shift.query.order_by(Shift.id.desc()).first()
+                last_processed_time = last_shift_entry.date_created if last_shift_entry else datetime.min
+
+                new_data = Instrumentsdb.query.with_entities(
+                    Instrumentsdb.date_created,
+                    getattr(Instrumentsdb, param_name1),
+                    getattr(Instrumentsdb, param_name2)
+                ).filter(Instrumentsdb.date_created > last_processed_time)\
+                .order_by(Instrumentsdb.date_created.asc())\
+                .limit(100).all()
+
+                if not new_data:
+                    return 
+                if len(new_data) < 100:
+                    return 
+
+                last_processed_data_time = Shift.query.order_by(Shift.date_created.desc()).first().date_created if Shift.query.first() else datetime.min
+                if new_data[0].date_created <= last_processed_data_time:
+                    return  
+
+                values1 = [getattr(item, param_name1) for item in new_data]
+                values2 = [getattr(item, param_name2) for item in new_data]
+                dv_bbr = Shift_F.D_BBR(values1)
+                dv_zeeman_ac = Shift_F.ZeemanAC(values1)
+                dv_stark = Shift_F.Stark(values1)
+                dv_zeeman = Shift_F.Zeeman(values2)
+                dv_gravitation = Shift_F.gravitation()
+                total = dv_bbr + dv_gravitation + dv_stark + dv_zeeman + dv_zeeman_ac
+                new_shift_entry = Shift(
+                    date_created=new_data[-1].date_created,
+                    DV_BBR=dv_bbr,
+                    DV_Zeeman_AC=dv_zeeman_ac,
+                    DV_Stark=dv_stark,
+                    DV_Zeeman=dv_zeeman,
+                    DV_Gavitational_effects=dv_gravitation,
+                    DV_Total=total
+                )
+                db.session.add(new_shift_entry)
+                db.session.commit()
+                self.update_shift_table()
+            except Exception as e:
+                print(f"Error: {e}")
+
+    def update_shift_table(self):
+        with app.app_context():
+            try:
+                last_shift_entry = Shift.query.order_by(Shift.id.desc()).first()
+                if last_shift_entry:
+                    # Formatear cada valor a 5 cifras significativas
+                    self.ui.table.setItem(0, 0, QtWidgets.QTableWidgetItem(f"{last_shift_entry.DV_Zeeman:.5g}"))
+                    self.ui.table.setItem(1, 0, QtWidgets.QTableWidgetItem(f"{last_shift_entry.DV_Zeeman_AC:.5g}"))
+                    self.ui.table.setItem(2, 0, QtWidgets.QTableWidgetItem(f"{last_shift_entry.DV_BBR:.5g}"))
+                    self.ui.table.setItem(3, 0, QtWidgets.QTableWidgetItem(f"{last_shift_entry.DV_Gavitational_effects:.5g}"))
+                    self.ui.table.setItem(4, 0, QtWidgets.QTableWidgetItem(f"{last_shift_entry.DV_Stark:.5g}"))
+                    self.ui.table.setItem(5, 0, QtWidgets.QTableWidgetItem(f"{last_shift_entry.DV_Total:.5g}"))
+                else:
+                    # Imprimir mensaje en la tabla si no hay datos disponibles
+                    self.ui.table.setItem(0, 0, QtWidgets.QTableWidgetItem("No data"))
+                    self.ui.table.setItem(1, 0, QtWidgets.QTableWidgetItem("No data"))
+                    self.ui.table.setItem(2, 0, QtWidgets.QTableWidgetItem("No data"))
+                    self.ui.table.setItem(3, 0, QtWidgets.QTableWidgetItem("No data"))
+                    self.ui.table.setItem(4, 0, QtWidgets.QTableWidgetItem("No data"))
+                    self.ui.table.setItem(5, 0, QtWidgets.QTableWidgetItem("No data"))
+            except ProgrammingError as e:
+                print(f"Error de base de datos: {e}")
 
     def populate_combobox(self):
         # Limpiar el contenido actual del QComboBox
@@ -138,6 +315,7 @@ class MainApp(QMainWindow):
         QMessageBox.information(self, "Server Started", "Flask server started successfully!")
         try:
             self.populate_combobox()
+            self.update_shift_table()
         except Exception as e:
         # Manejar la excepción aquí
             print("Error:", e)
@@ -171,215 +349,12 @@ class MainApp(QMainWindow):
         except Exception as e:
             # Mostrar un mensaje de error si ocurre alguna excepción
             QMessageBox.critical(self, "Error", "Failed to export data: " + str(e))
-
-
-
-def flask_runner():
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(send_dataintrument, 'interval', minutes=0.5)
-    scheduler.start()
-
-    # Crear todas las tablas de la base de datos dentro del contexto de la aplicación Flask
-    with app.app_context():
-        db.create_all()
-        #calculate_and_update_shift()
-
-    app.run(debug=True, use_reloader=False)
-
-
-
-
-   
-def send_dataintrument():
-    try:
-        with app.app_context():
-            RM = pyvisa.ResourceManager()
-            Instru = RM.open_resource('ASRL3::INSTR')
-
-            # Crear una instancia del instrumento
-            instrumento = CesiumInstrument()
-
-            # Leer datos del instrumento pasando la conexión como argumento
-            datos = instrumento.read_data(Instru)
-
-            # Crear una instancia del modelo con los datos del instrumento
-            instrumentdb = Instrumentsdb(**datos)
-
-            # Agregar la instancia a la base de datos
-            db.session.add(instrumentdb)
-            db.session.commit()
-
-            # Cerrar la conexión con el instrumento
-            Instru.close()
-            RM.close()
-
-    except Exception as e:
-        print("Error:", e)
-
-app = Flask(__name__)
-app.config.from_object(Config)
-db = SQLAlchemy(app)
-
-class Instrumentsdb(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    date_created = db.Column(db.DateTime, default=db.func.current_timestamp())
-    MJD = db.Column(db.Float)
-    D01 = db.Column(db.String(255))
-    Beam_current_setpoint = db.Column(db.Float)
-    Cfield_current_setpoint = db.Column(db.Float)
-    Ion_pump_current = db.Column(db.Float)
-    Signal_gain = db.Column(db.Float)
-    RF_Attenuator_setpoints_1 = db.Column(db.Float)
-    RF_Attenuator_setpoints_2 = db.Column(db.Float)
-    Power_supply_status = db.Column(db.String(255))
-    Temperature = db.Column(db.Float)
-    Cesium_oven_heater = db.Column(db.Float)
-    ECesium_oven_heater_voltage= db.Column(db.Float)
-    Hot_wire_ionizer_voltage = db.Column(db.Float)
-    Mass_spectrometer_voltage = db.Column(db.Float)
-    PLLoop_1 = db.Column(db.Float)
-    PLLoop_2 = db.Column(db.Float)
-    PLLoop_3 = db.Column(db.Float)
-    PLLoop_4 = db.Column(db.Float)
-    ROSCillator = db.Column(db.Float)
-    Power_supplie_1 = db.Column(db.Float)
-    Power_supplie_2 = db.Column(db.Float)
-    Power_supplie_3 = db.Column(db.Float)
-    Reference_oscillator_frequency = db.Column(db.Float)
-    Fractional_frequency_offset = db.Column(db.Float)
-    Programmed_frequency_at_specified = db.Column(db.Float)
-    Oscillator_oven_voltage = db.Column(db.Float)
-    Zeeman_Freq = db.Column(db.Float)
-    CBT_Oven_Err = db.Column(db.Float)
-
-class Shift(db.Model):
-    __tablename__ = 'shift'
-    id = db.Column(db.Integer, primary_key=True)
-    date_created = db.Column(db.Integer, db.ForeignKey('instrumentsdb.id'))
-    DV_Zeeman = db.Column(db.Float)
-    DV_Zeman_AC = db.Column(db.Float)
-    DV_Stark = db.Column(db.Float)
-    DV_Gavitational_effects = db.Column(db.Float)
-    DV_BBR = db.Column(db.Float)
-    # Relación con la tabla de datos existente
-    data = db.relationship("Instrumentsdb")
-
-def check_data_dbmodeltable(model):
-    try:
-        with app.app_context():
-
-            num_records = model.query.count()
-
-            if num_records > 0:
-                return True
-            else:
-                return False
-    except Exception as e:
-        print("Error:", e)
-
-def dicts_to_modelos(lista_datos,model):
-    try:
-        with app.app_context():
-            for datos in lista_datos:
-                # Crear una instancia del modelo con los datos del diccionario
-                instrumentdb = model(**datos)
-
-                # Agregar la instancia a la sesión de la base de datos
-                db.session.add(instrumentdb)
-
-            # Realizar la confirmación para guardar todos los cambios
-            db.session.commit()
-
-    except Exception as e:
-        print("Error:", e)
-
-
-@app.route('/api/send_datainstrument', methods=['POST'])
-def send_data():
-    data = request.json  # Espera que los datos se envíen como JSON en el cuerpo de la solicitud
-    try:
-        # Crear una instancia de Instrumentsdb con los datos recibidos
-        instrument = Instrumentsdb(**data)
-        
-        # Agregar la instancia a la base de datos
-        db.session.add(instrument)
-        db.session.commit()
-        
-        return jsonify({'message': 'Datos guardados correctamente'}), 201
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    
-
-@app.route("/api/savedbintruments")
-def send_dataintrument():
-    try:
-        with app.app_context():
-            RM = pyvisa.ResourceManager()
-            Instru = RM.open_resource('ASRL3::INSTR')
-
-            # Crear una instancia del instrumento
-            instrumento = CesiumInstrument()
-
-            # Leer datos del instrumento pasando la conexión como argumento
-            datos = instrumento.read_data(Instru)
-            
-
-            # Crear una instancia del modelo con los datos del instrumento
-            instrumentdb = Instrumentsdb(**datos)
-
-            # Agregar la instancia a la base de datos
-            db.session.add(instrumentdb)
-            db.session.commit()
-            
-            # Cerrar la conexión con el instrumento
-            Instru.close()
-            RM.close()
-
-    except Exception as e:
-        print("Error:", e)
-
-
-
-def query_to_dict(rset):
-    result = defaultdict(list)
-    for obj in rset:
-        instance = inspect(obj)
-        for key, x in instance.attrs.items():
-            result[key].append(x.value if x.value is not None else None)
-    return result
-
-@app.route("/api/exportInstrumentsdbcsv")
-def export_csv():
-    try:
-        data=Instrumentsdb.query.all()
-         # Convertir el resultado a un diccionario usando query_to_dict
-        data_dict = query_to_dict(data)
-
-        # Crear un DataFrame con los datos
-        df = pd.DataFrame(data_dict)
-
-        # Crear un objeto StringIO para escribir el CSV en memoria
-        output = StringIO()
-
-        # Especificar la codificación utf-8 al escribir el CSV
-        df.to_csv(output, index=False, encoding='utf-8')
-
-        # Crear una respuesta con el CSV en formato texto
-        response = make_response(output.getvalue())
-        response.headers['Content-Disposition'] = 'attachment; filename=Instrumentsdb.csv'
-        response.headers['Content-type'] = 'text/csv; charset=utf-8'  # Especificar la codificación utf-8
-
-        return response
-
-    except Exception as e:
-        return jsonify({'error': str(e)})
-
 def main():
-    # Iniciar la aplicación PyQt
     app = QApplication(sys.argv)
+    splash = SplashScreen()
+    splash.show()
     window = MainApp()
-    window.show()
+    QTimer.singleShot(10000, lambda: window.show()) 
     sys.exit(app.exec())
 
 if __name__ == "__main__":
