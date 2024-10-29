@@ -288,21 +288,25 @@ class MainApp(QMainWindow):
         # Limpiar el contenido actual del QComboBox
         self.ui.parameter.clear()
         self.ui.parameter.addItem("Select a parameter...")
+
         # Obtener las columnas de la tabla en la base de datos
         try:
             with app.app_context():  # Establecer el contexto de la aplicación
                 inspector = inspect(db.engine)
                 table_columns = inspector.get_columns('instrumentsdb')  # Reemplaza 'instrumentsdb' con el nombre real de tu tabla
+                
+                # Obtener los nombres de las columnas que no son de tipo str, ni son id, ni son date_created, ni son MJD
+                param_names = [
+                    column['name'] for column in table_columns
+                    if not isinstance(column['type'], String) and column['name'] not in ["id", "date_created", "MJD"]
+                ]
+                # Agregar las claves al QComboBox
+                param_names = [param.replace('_', ' ') for param in param_names]
+                self.ui.parameter.addItems(param_names)
+                
         except Exception as e:
             print("Error al obtener las columnas de la tabla:", e)
-            
 
-        # Obtener los nombres de las columnas que no son de tipo str, ni son id, ni son data_cread, ni son MJD
-        param_names = [column['name'] for column in table_columns if not isinstance(column['type'], String) and column['name'] not in ["id", "date_created", "MJD"]]
-        # Agregar las claves al QComboBox
-        param_names = [param.replace('_', ' ') for param in param_names]
-        self.ui.parameter.addItems(param_names)
-    
 
     def start_flask(self):
         flask_thread = threading.Thread(target=flask_runner)

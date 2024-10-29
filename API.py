@@ -50,7 +50,9 @@ def export_csv():
         df = pd.DataFrame(data_dict)
 
         # Asegurarse de que 'date_created' esté en el formato correcto
+        df['date_created'] = pd.to_datetime(df['date_created'], errors='coerce')
         df['date_created'] = df['date_created'].dt.strftime('%Y-%m-%d %H:%M:%S.%f')
+
 
         # Crear un objeto StringIO para escribir el CSV en memoria
         output = StringIO()
