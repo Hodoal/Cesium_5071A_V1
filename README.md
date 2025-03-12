@@ -4,7 +4,7 @@ Este documento describe paso a paso la instalación, configuración y ejecución
 
 ## 1. Introducción
 
-Cesium_5071A_V1 es una aplicación diseñada para la caracterización y análisis de relojes atómicos, basada en la frecuencia del cesio. Utiliza una interfaz gráfica desarrollada en PyQt6 y maneja datos obtenidos de mediciones para su procesamiento y visualización. Su propósito es facilitar la interpretación de datos experimentales y mejorar la precisión en el análisis de los relojes atómicos, permitiendo una gestión eficiente de las mediciones y resultados.
+Cesium_5071A_V1 es una aplicación diseñada para la caracterización y análisis de relojes atómicos, basada en la frecuencia del cesio. Utiliza una interfaz gráfica desarrollada en PyQt6 y maneja datos obtenidos de mediciones para su procesamiento y visualización. Su propósito es facilitar la interpretación de datos experimentales y mejorar la exactitud en el análisis de los relojes atómicos, permitiendo una gestión eficiente de las mediciones y resultados.
 
 ## 2. Requisitos Previos
 
